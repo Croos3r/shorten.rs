@@ -1,4 +1,7 @@
-use std::sync::{LazyLock, Mutex};
+use std::{
+    ops::AddAssign,
+    sync::{Arc, LazyLock, Mutex},
+};
 
 use actix_web::{App, HttpResponse, HttpServer, Responder, get, http, post, web};
 use actix_web_validator::Query;
@@ -16,6 +19,7 @@ const ID_SIZE: u8 = 5;
 struct ShortenedUrl {
     pub id: String,
     pub full_url: String,
+    pub visits: Arc<Mutex<usize>>,
 }
 
 impl Display for ShortenedUrl {
@@ -31,6 +35,7 @@ impl ShortenedUrl {
         Self {
             id,
             full_url: url.into(),
+            visits: Arc::new(Mutex::new(0)),
         }
     }
 }
@@ -101,6 +106,11 @@ async fn redirect_to_url_for_id(
     };
 
     if let Some(shortened_url) = shortened_url {
+        shortened_url
+            .visits
+            .lock()
+            .expect("Could not write visits")
+            .add_assign(1);
         HttpResponse::TemporaryRedirect()
             .insert_header((http::header::LOCATION, shortened_url.full_url.clone()))
             .body(format!("Redirecting to {}...", shortened_url.full_url))
