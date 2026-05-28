@@ -10,7 +10,7 @@ use validator::Validate;
 
 static RE_HTTP_SCHEME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^https?://.+").unwrap());
 
-const ID_SIZE: u8 = 10;
+const ID_SIZE: u8 = 5;
 
 #[derive(Debug, Clone)]
 struct ShortenedUrl {
@@ -73,11 +73,18 @@ async fn shorten_url(
     let url = query.into_inner().url;
     let id = {
         let mut urls = urls.lock().expect("Lock poisoned");
-        let new_shortened_url = ShortenedUrl::new(url);
-        let id = new_shortened_url.id.clone();
+        if let Some(shortened_url) = urls
+            .iter()
+            .find(|shortened_url| url == shortened_url.full_url)
+        {
+            shortened_url.id.clone()
+        } else {
+            let new_shortened_url = ShortenedUrl::new(url);
+            let id = new_shortened_url.id.clone();
 
-        urls.push(new_shortened_url);
-        id
+            urls.push(new_shortened_url);
+            id
+        }
     };
     HttpResponse::Ok().body(id)
 }
