@@ -1,0 +1,40 @@
+use actix_web::{
+    HttpResponse, Responder, get, http, post,
+    web::{Data, Path},
+};
+use actix_web_validator::Query;
+
+use crate::{ShortenUrlDto, services::url_shortener::UrlShortenerService};
+
+#[post("/shorten")]
+pub async fn shorten_url(
+    url_shortener_service: Data<UrlShortenerService>,
+    query: Query<ShortenUrlDto>,
+) -> impl Responder {
+    let url = query.into_inner().url;
+    let Ok(id) = url_shortener_service.shorten_url(&url).await else {
+        return HttpResponse::InternalServerError().body("An error has occurred");
+    };
+    HttpResponse::Ok().body(id)
+}
+
+#[get("/{id}")]
+pub async fn redirect_to_url_for_id(
+    id: Path<String>,
+    url_shortener_service: Data<UrlShortenerService>,
+) -> impl Responder {
+    let id = id.into_inner();
+    let shortened_url = match url_shortener_service.find_by_id(&id).await {
+        Ok(Some(shortened_url)) => shortened_url,
+        Ok(None) => return HttpResponse::NotFound().body("No url for this id"),
+        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+    };
+    //shortened_url
+    //    .visits
+    //    .lock()
+    //    .expect("Could not write visits")
+    //    .add_assign(1);
+    HttpResponse::TemporaryRedirect()
+        .insert_header((http::header::LOCATION, shortened_url.full_url.clone()))
+        .body(format!("Redirecting to {}...", shortened_url.full_url))
+}
