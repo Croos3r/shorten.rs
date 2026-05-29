@@ -1,4 +1,6 @@
-pub mod controller;
+// Private: handlers are an implementation detail wired up through `configure`,
+// not part of the supported public API.
+mod controller;
 pub mod services;
 
 use std::sync::LazyLock;
