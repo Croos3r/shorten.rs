@@ -116,12 +116,16 @@ mod tests {
     }
 
     #[test]
-    fn new_generates_distinct_ids() {
-        // Collisions across 5 alphanumeric chars are astronomically unlikely;
-        // this guards against an accidentally constant id generator.
-        let a = ShortenedUrl::new("https://a.example");
-        let b = ShortenedUrl::new("https://b.example");
-        assert_ne!(a.id, b.id);
+    fn new_does_not_generate_a_constant_id() {
+        // Guards against an accidentally constant/broken generator without
+        // relying on any two specific samples differing (which has a tiny but
+        // non-zero collision chance for 5 alphanumeric chars). A working random
+        // generator will virtually never produce the same id ten times.
+        let first = ShortenedUrl::new("https://example.com").id;
+        let all_identical = (0..10)
+            .map(|_| ShortenedUrl::new("https://example.com").id)
+            .all(|id| id == first);
+        assert!(!all_identical, "id generator appears to be constant");
     }
 
     #[test]
