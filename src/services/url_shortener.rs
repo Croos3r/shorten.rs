@@ -100,3 +100,41 @@ impl UrlShortenerService {
         .context(format!("Could not increment visits of {id}"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_generates_five_char_alphanumeric_id() {
+        let url = "https://example.com";
+        let shortened = ShortenedUrl::new(url);
+        assert_eq!(shortened.id.len(), ID_SIZE as usize);
+        assert!(shortened.id.chars().all(|c| c.is_ascii_alphanumeric()));
+        assert_eq!(shortened.full_url, url);
+        assert_eq!(shortened.visits, 0);
+    }
+
+    #[test]
+    fn new_generates_distinct_ids() {
+        // Collisions across 5 alphanumeric chars are astronomically unlikely;
+        // this guards against an accidentally constant id generator.
+        let a = ShortenedUrl::new("https://a.example");
+        let b = ShortenedUrl::new("https://b.example");
+        assert_ne!(a.id, b.id);
+    }
+
+    #[test]
+    fn from_parts_sets_all_fields() {
+        let shortened = ShortenedUrl::from_parts("abc12", "https://example.com", 7u32);
+        assert_eq!(shortened.id, "abc12");
+        assert_eq!(shortened.full_url, "https://example.com");
+        assert_eq!(shortened.visits, 7);
+    }
+
+    #[test]
+    fn display_formats_as_id_colon_url() {
+        let shortened = ShortenedUrl::from_parts("abc12", "https://example.com", 0u32);
+        assert_eq!(shortened.to_string(), "abc12: https://example.com");
+    }
+}
