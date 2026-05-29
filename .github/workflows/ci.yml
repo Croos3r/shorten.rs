@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # rustfmt does not compile code, so it needs no database.
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      # sqlx verifies `query!` macros against a real database at compile time,
+      # so clippy and the tests need a migrated SQLite database to build.
+      - name: Set up SQLite database
+        run: |
+          DB_PATH="$PWD/ci.sqlite"
+          for f in migrations/*.sql; do sqlite3 "$DB_PATH" < "$f"; done
+          echo "DATABASE_URL=sqlite:$DB_PATH" >> "$GITHUB_ENV"
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets
+
+  release-build:
+    name: Release Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Set up SQLite database
+        run: |
+          DB_PATH="$PWD/ci.sqlite"
+          for f in migrations/*.sql; do sqlite3 "$DB_PATH" < "$f"; done
+          echo "DATABASE_URL=sqlite:$DB_PATH" >> "$GITHUB_ENV"
+
+      - name: Build (release)
+        run: cargo build --release
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Set up SQLite database
+        run: |
+          DB_PATH="$PWD/ci.sqlite"
+          for f in migrations/*.sql; do sqlite3 "$DB_PATH" < "$f"; done
+          echo "DATABASE_URL=sqlite:$DB_PATH" >> "$GITHUB_ENV"
+
+      - name: Collect coverage
+        run: cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info
+
+      - name: Write coverage summary
+        run: |
+          {
+            echo '### Coverage'
+            echo '```'
+            cargo llvm-cov report
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
+
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # Reads Cargo.lock only; no build and no database required.
+      - name: Audit dependencies
+        run: cargo audit
