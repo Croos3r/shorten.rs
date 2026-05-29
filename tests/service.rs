@@ -68,3 +68,31 @@ async fn find_by_id_returns_none_for_unknown_id() {
 
     assert!(result.is_none());
 }
+
+#[actix_web::test]
+async fn increment_visit_by_id_increases_the_counter() {
+    let service = common::test_service().await;
+    let id = service.shorten_url("https://example.com").await.unwrap();
+
+    // A freshly shortened url starts with zero visits.
+    assert_eq!(service.find_by_id(&id).await.unwrap().unwrap().visits, 0);
+
+    service.increment_visit_by_id(&id).await.unwrap();
+    assert_eq!(service.find_by_id(&id).await.unwrap().unwrap().visits, 1);
+
+    service.increment_visit_by_id(&id).await.unwrap();
+    assert_eq!(service.find_by_id(&id).await.unwrap().unwrap().visits, 2);
+}
+
+#[actix_web::test]
+async fn increment_visit_by_id_is_a_noop_for_unknown_id() {
+    let service = common::test_service().await;
+
+    // Updating a non-existent row succeeds (0 rows affected) and creates nothing.
+    service
+        .increment_visit_by_id("missing")
+        .await
+        .expect("incrementing an unknown id should not error");
+
+    assert!(service.find_by_id("missing").await.unwrap().is_none());
+}
