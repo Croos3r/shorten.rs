@@ -111,3 +111,27 @@ async fn shorten_then_redirect_round_trip() {
         "https://round.trip.example/page"
     );
 }
+
+#[actix_web::test]
+async fn redirect_increments_visit_counter() {
+    // Keep a handle on the service to read visits afterwards; the clone shares
+    // the same underlying pool as the copy moved into the app.
+    let service = common::test_service().await;
+    let id = service
+        .shorten_url("https://counted.example")
+        .await
+        .unwrap();
+    let app = init_app!(service.clone());
+
+    for _ in 0..2 {
+        let req = test::TestRequest::get().uri(&format!("/{id}")).to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+    }
+
+    let visits = service.find_by_id(&id).await.unwrap().unwrap().visits;
+    assert_eq!(
+        visits, 2,
+        "each redirect should increment the visit counter"
+    );
+}
