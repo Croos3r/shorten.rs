@@ -11,7 +11,7 @@ const ID_SIZE: u8 = 5;
 pub struct ShortenedUrl {
     pub id: String,
     pub full_url: String,
-    pub visits: usize,
+    pub visits: u32,
 }
 
 impl Display for ShortenedUrl {
@@ -34,7 +34,7 @@ impl ShortenedUrl {
     pub fn from_parts(
         id: impl Into<String>,
         url: impl Into<String>,
-        visits: impl Into<usize>,
+        visits: impl Into<u32>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -67,9 +67,10 @@ impl UrlShortenerService {
 
         let new_shortened_url = ShortenedUrl::new(url);
         sqlx::query!(
-            "INSERT INTO shortened_urls VALUES (?, ?)",
+            "INSERT INTO shortened_urls VALUES (?, ?, ?)",
             new_shortened_url.id,
-            new_shortened_url.full_url
+            new_shortened_url.full_url,
+            new_shortened_url.visits
         )
         .execute(&self.db_pool)
         .await?;
@@ -81,8 +82,21 @@ impl UrlShortenerService {
             .fetch_optional(&self.db_pool)
             .await
             .map(|record| {
-                record.map(|record| ShortenedUrl::from_parts(record.id, record.full_url, 0usize))
+                record.map(|record| {
+                    ShortenedUrl::from_parts(record.id, record.full_url, record.visits as u32)
+                })
             })
             .context(format!("Could not get shortened url for {id}"))
+    }
+
+    pub async fn increment_visit_by_id(&self, id: &str) -> Result<()> {
+        sqlx::query!(
+            "UPDATE shortened_urls SET visits = visits + 1 WHERE id = ?",
+            id
+        )
+        .execute(&self.db_pool)
+        .await
+        .map(|_| ())
+        .context(format!("Could not increment visits of {id}"))
     }
 }

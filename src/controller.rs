@@ -29,11 +29,10 @@ pub async fn redirect_to_url_for_id(
         Ok(None) => return HttpResponse::NotFound().body("No url for this id"),
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
-    //shortened_url
-    //    .visits
-    //    .lock()
-    //    .expect("Could not write visits")
-    //    .add_assign(1);
+    let _ = url_shortener_service
+        .increment_visit_by_id(&id)
+        .await
+        .map_err(|err| eprintln!("Could not increment visits of {id}: {err}"));
     HttpResponse::TemporaryRedirect()
         .insert_header((http::header::LOCATION, shortened_url.full_url.clone()))
         .body(format!("Redirecting to {}...", shortened_url.full_url))
