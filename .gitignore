@@ -1,4 +1,6 @@
-/target
-.env*
-!.env.example
-database.sqlite*
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
