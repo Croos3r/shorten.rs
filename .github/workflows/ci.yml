@@ -16,6 +16,9 @@ jobs:
   lint-and-test:
     name: Lint & Test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
 
@@ -25,6 +28,8 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
 
       # rustfmt does not compile code, so it needs no database.
       - name: Check formatting
@@ -47,6 +52,9 @@ jobs:
   release-build:
     name: Release Build
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
 
@@ -54,6 +62,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
 
       - name: Set up SQLite database
         run: |
@@ -67,6 +77,9 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
 
@@ -76,6 +89,8 @@ jobs:
           components: llvm-tools-preview
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -104,11 +119,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-lcov
-          path: lcov.info
+          path: backend/lcov.info
 
   audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
 
