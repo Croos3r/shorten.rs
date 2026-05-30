@@ -10,6 +10,14 @@ services:
       DATABASE_URL: sqlite:/data/database.sqlite
     volumes:
       - backend-data:/data
+    healthcheck:
+      # Any HTTP response (even 404) means the server is accepting requests;
+      # plain curl (no -f) exits 0 as long as it connects.
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   frontend:
@@ -21,7 +29,8 @@ services:
       HOST: 0.0.0.0
       PORT: "3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
