@@ -1,0 +1,28 @@
+services:
+  backend:
+    build: ./backend
+    image: shorten-rs-backend
+    ports:
+      - "8080:8080"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8080"
+      DATABASE_URL: sqlite:/data/database.sqlite
+    volumes:
+      - backend-data:/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    image: shorten-rs-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend-data:

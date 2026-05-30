@@ -1,0 +1,7 @@
+target
+.env
+.env.example
+database.sqlite*
+.gitignore
+Dockerfile
+.dockerignore
