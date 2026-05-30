@@ -1,7 +1,7 @@
-use std::env;
+use std::{env, str::FromStr};
 
 use actix_web::{App, HttpServer, web::Data};
-use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 use shorten_rs::{configure, services::url_shortener::UrlShortenerService};
 
@@ -17,7 +17,22 @@ async fn main() -> std::io::Result<()> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(8080);
 
-    let pool = SqlitePool::connect(&database_url).await.unwrap();
+    let options = SqliteConnectOptions::from_str(&database_url)
+        .expect("DATABASE_URL is not a valid SQLite connection string")
+        .create_if_missing(true);
+    let pool = SqlitePoolOptions::new()
+        .connect_with(options)
+        .await
+        .expect("failed to connect to the database");
+
+    // Own the schema lifecycle: apply any pending migrations on startup. sqlx
+    // tracks applied migrations, so a fresh database is initialised and future
+    // migrations are picked up without re-running existing ones.
+    sqlx::migrate!()
+        .run(&pool)
+        .await
+        .expect("failed to run database migrations");
+
     let url_shortener_service = UrlShortenerService::new(pool.clone());
     HttpServer::new(move || {
         App::new()

@@ -14,11 +14,11 @@ COPY Cargo.toml Cargo.lock ./
 COPY migrations ./migrations
 COPY src ./src
 
-# Build a migrated SQLite database so the compile-time `query!` checks pass,
-# and keep it around to seed runtime volumes from a known-good schema.
-RUN mkdir -p /build \
-    && for f in migrations/*.sql; do sqlite3 /build/template.sqlite < "$f"; done
-ENV DATABASE_URL=sqlite:/build/template.sqlite
+# A throwaway migrated database so the compile-time `query!` checks pass. The
+# running app applies migrations itself (see src/main.rs), so this DB is only
+# needed during the build.
+RUN for f in migrations/*.sql; do sqlite3 /tmp/compile.sqlite < "$f"; done
+ENV DATABASE_URL=sqlite:/tmp/compile.sqlite
 
 RUN cargo build --release
 
@@ -26,17 +26,16 @@ RUN cargo build --release
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 
+# curl is used by the container healthcheck; libssl3 by tls-native-tls.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/shorten-rs /usr/local/bin/shorten-rs
-COPY --from=builder /build/template.sqlite /app/template.sqlite
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # The app reads these at startup (see src/main.rs). 0.0.0.0 makes the published
-# port reachable from outside the container.
+# port reachable from outside the container; it creates and migrates the
+# database file on first start.
 ENV HOST=0.0.0.0 \
     PORT=8080 \
     DATABASE_URL=sqlite:/data/database.sqlite
@@ -44,5 +43,4 @@ ENV HOST=0.0.0.0 \
 EXPOSE 8080
 VOLUME ["/data"]
 
-ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["shorten-rs"]
