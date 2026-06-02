@@ -4,6 +4,10 @@
 //! file) keeps Cargo from compiling this as its own test binary; instead each
 //! integration test pulls it in with `mod common;`.
 
+// Each integration test binary includes this module but only uses the helpers
+// it needs, so unused-helper warnings are expected and not actionable.
+#![allow(dead_code)]
+
 use shorten_rs::DatabasePool;
 use shorten_rs::services::url_shortener::UrlShortenerService;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -29,4 +33,13 @@ pub async fn test_pool() -> DatabasePool {
 /// Convenience wrapper returning a service backed by a fresh in-memory database.
 pub async fn test_service() -> UrlShortenerService {
     UrlShortenerService::new(test_pool().await, vec![])
+}
+
+/// Like [`test_service`] but with a configured URL blacklist, for exercising
+/// the "cannot shorten our own urls" behaviour.
+pub async fn test_service_with_blacklist(
+    blacklisted_urls: Vec<impl Into<String>>,
+) -> UrlShortenerService {
+    let blacklisted_urls = blacklisted_urls.into_iter().map(Into::into).collect();
+    UrlShortenerService::new(test_pool().await, blacklisted_urls)
 }
