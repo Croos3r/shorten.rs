@@ -1,6 +1,6 @@
-use std::fmt::Display;
+use std::{error::Error, fmt::Display};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use rand::distr::{Alphanumeric, SampleString};
 
 use crate::DatabasePool;
@@ -44,17 +44,48 @@ impl ShortenedUrl {
     }
 }
 
+#[derive(Debug)]
+pub enum ShortenUrlError {
+    BlacklistedUrl,
+}
+
+impl Display for ShortenUrlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ShortenUrlError::BlacklistedUrl => {
+                write!(f, "This url is blacklisted and cannot be shortened")
+            }
+        }
+    }
+}
+
+impl Error for ShortenUrlError {}
+
 #[derive(Debug, Clone)]
 pub struct UrlShortenerService {
     db_pool: DatabasePool,
+    blacklisted_urls: Vec<String>,
 }
 
 impl UrlShortenerService {
-    pub fn new(db_pool: DatabasePool) -> Self {
-        Self { db_pool }
+    pub fn new(db_pool: DatabasePool, blacklisted_urls: Vec<String>) -> Self {
+        Self {
+            db_pool,
+            blacklisted_urls,
+        }
+    }
+
+    pub fn is_blacklisted(&self, url: &str) -> bool {
+        self.blacklisted_urls
+            .iter()
+            .any(|blacklisted_url| url.starts_with(blacklisted_url))
     }
 
     pub async fn shorten_url(&self, url: &str) -> Result<String> {
+        if self.is_blacklisted(url) {
+            bail!(ShortenUrlError::BlacklistedUrl)
+        }
+
         if let Some(existing_shortened_url) = sqlx::query!(
             "SELECT id FROM shortened_urls WHERE full_url = ? LIMIT 1",
             url
