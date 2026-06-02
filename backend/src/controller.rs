@@ -4,7 +4,10 @@ use actix_web::{
 };
 use actix_web_validator::Query;
 
-use crate::{ShortenUrlDto, services::url_shortener::UrlShortenerService};
+use crate::{
+    ShortenUrlDto,
+    services::url_shortener::{ShortenUrlError, UrlShortenerService},
+};
 
 #[post("/shorten")]
 pub async fn shorten_url(
@@ -12,10 +15,15 @@ pub async fn shorten_url(
     query: Query<ShortenUrlDto>,
 ) -> impl Responder {
     let url = query.into_inner().url;
-    let Ok(id) = url_shortener_service.shorten_url(&url).await else {
-        return HttpResponse::InternalServerError().body("An error has occurred");
-    };
-    HttpResponse::Ok().body(id)
+    match url_shortener_service.shorten_url(&url).await {
+        Ok(id) => HttpResponse::Ok().body(id),
+        Err(err) => err
+            .downcast::<ShortenUrlError>()
+            .map(ShortenUrlError::into)
+            .unwrap_or_else(|_| {
+                HttpResponse::InternalServerError().body("An unknown error has occured")
+            }),
+    }
 }
 
 #[get("/{id}")]

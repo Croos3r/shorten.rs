@@ -28,5 +28,5 @@ pub async fn test_pool() -> DatabasePool {
 
 /// Convenience wrapper returning a service backed by a fresh in-memory database.
 pub async fn test_service() -> UrlShortenerService {
-    UrlShortenerService::new(test_pool().await)
+    UrlShortenerService::new(test_pool().await, vec![])
 }

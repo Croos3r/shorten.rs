@@ -1,5 +1,6 @@
 use std::{error::Error, fmt::Display};
 
+use actix_web::HttpResponse;
 use anyhow::{Context, Result, bail};
 use rand::distr::{Alphanumeric, SampleString};
 
@@ -59,7 +60,14 @@ impl Display for ShortenUrlError {
     }
 }
 
-impl Error for ShortenUrlError {}
+impl From<ShortenUrlError> for HttpResponse {
+    fn from(val: ShortenUrlError) -> Self {
+        match val {
+            ShortenUrlError::BlacklistedUrl => HttpResponse::BadRequest(),
+        }
+        .body(val.to_string())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct UrlShortenerService {
