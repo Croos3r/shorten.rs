@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::Display};
+use std::fmt::Display;
 
 use actix_web::HttpResponse;
 use anyhow::{Context, Result, bail};
