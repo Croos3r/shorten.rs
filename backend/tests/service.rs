@@ -3,6 +3,8 @@
 
 mod common;
 
+use shorten_rs::services::url_shortener::ShortenUrlError;
+
 const ID_LEN: usize = 5;
 
 #[actix_web::test]
@@ -95,4 +97,99 @@ async fn increment_visit_by_id_is_a_noop_for_unknown_id() {
         .expect("incrementing an unknown id should not error");
 
     assert!(service.find_by_id("missing").await.unwrap().is_none());
+}
+
+#[actix_web::test]
+async fn is_blacklisted_matches_exact_url() {
+    let service = common::test_service_with_blacklist(vec!["https://mydomain.com"]).await;
+
+    assert!(service.is_blacklisted("https://mydomain.com"));
+}
+
+#[actix_web::test]
+async fn is_blacklisted_matches_any_url_under_a_blacklisted_prefix() {
+    // Blacklisting is prefix-based (`starts_with`), so paths and query strings
+    // under a blacklisted origin are also blocked.
+    let service = common::test_service_with_blacklist(vec!["https://mydomain.com"]).await;
+
+    assert!(service.is_blacklisted("https://mydomain.com/abc12"));
+    assert!(service.is_blacklisted("https://mydomain.com/path?ref=1"));
+}
+
+#[actix_web::test]
+async fn is_blacklisted_is_false_for_unrelated_urls() {
+    let service = common::test_service_with_blacklist(vec!["https://mydomain.com"]).await;
+
+    assert!(!service.is_blacklisted("https://example.com"));
+    // A different scheme is a different prefix and must not match.
+    assert!(!service.is_blacklisted("http://mydomain.com"));
+}
+
+#[actix_web::test]
+async fn is_blacklisted_is_always_false_with_an_empty_blacklist() {
+    let service = common::test_service().await;
+
+    assert!(!service.is_blacklisted("https://mydomain.com"));
+    assert!(!service.is_blacklisted("anything-at-all"));
+}
+
+#[actix_web::test]
+async fn is_blacklisted_checks_every_configured_entry() {
+    let service = common::test_service_with_blacklist(vec![
+        "http://localhost:8080",
+        "https://localhost:8080",
+        "http://localhost:5173",
+        "https://localhost:5173",
+    ])
+    .await;
+
+    assert!(service.is_blacklisted("https://localhost:5173/dashboard"));
+    assert!(service.is_blacklisted("http://localhost:8080/shorten"));
+    assert!(!service.is_blacklisted("https://localhost:3000"));
+}
+
+#[actix_web::test]
+async fn shorten_url_rejects_a_blacklisted_url() {
+    let service = common::test_service_with_blacklist(vec!["https://mydomain.com"]).await;
+
+    let err = service
+        .shorten_url("https://mydomain.com/self")
+        .await
+        .expect_err("shortening a blacklisted url should fail");
+
+    assert!(
+        matches!(
+            err.downcast_ref::<ShortenUrlError>(),
+            Some(ShortenUrlError::BlacklistedUrl)
+        ),
+        "error should be a BlacklistedUrl, got: {err:?}"
+    );
+}
+
+#[actix_web::test]
+async fn shorten_url_does_not_persist_a_blacklisted_url() {
+    let service = common::test_service_with_blacklist(vec!["https://mydomain.com"]).await;
+
+    // The blacklist check must short-circuit before any insert; shortening an
+    // allowed url afterwards yields the very first generated id, proving no row
+    // was written for the rejected one.
+    let _ = service.shorten_url("https://mydomain.com/self").await;
+
+    let id = service
+        .shorten_url("https://example.com")
+        .await
+        .expect("a non-blacklisted url should still be shortenable");
+    let stored = service.find_by_id(&id).await.unwrap().unwrap();
+    assert_eq!(stored.full_url, "https://example.com");
+}
+
+#[actix_web::test]
+async fn shorten_url_allows_urls_outside_the_blacklist() {
+    let service = common::test_service_with_blacklist(vec!["https://mydomain.com"]).await;
+
+    let id = service
+        .shorten_url("https://example.com")
+        .await
+        .expect("a url outside the blacklist should be shortenable");
+    assert_eq!(id.len(), ID_LEN);
 }

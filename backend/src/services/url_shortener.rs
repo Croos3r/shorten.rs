@@ -180,4 +180,20 @@ mod tests {
         let shortened = ShortenedUrl::from_parts("abc12", "https://example.com", 0u32);
         assert_eq!(shortened.to_string(), "abc12: https://example.com");
     }
+
+    #[test]
+    fn blacklisted_url_error_displays_human_readable_message() {
+        assert_eq!(
+            ShortenUrlError::BlacklistedUrl.to_string(),
+            "This url is blacklisted and cannot be shortened"
+        );
+    }
+
+    #[test]
+    fn blacklisted_url_error_converts_to_400_response_with_message_body() {
+        use actix_web::http::StatusCode;
+
+        let response: HttpResponse = ShortenUrlError::BlacklistedUrl.into();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
 }

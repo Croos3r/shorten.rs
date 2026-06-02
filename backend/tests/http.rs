@@ -63,6 +63,34 @@ async fn post_shorten_without_url_param_returns_400() {
 }
 
 #[actix_web::test]
+async fn post_shorten_with_blacklisted_url_returns_400() {
+    let app = init_app!(common::test_service_with_blacklist(vec!["https://mydomain.com"]).await);
+
+    let req = test::TestRequest::post()
+        .uri("/shorten?url=https://mydomain.com/self")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = test::read_body(resp).await;
+    assert_eq!(body, "This url is blacklisted and cannot be shortened");
+}
+
+#[actix_web::test]
+async fn post_shorten_allows_url_outside_blacklist() {
+    let app = init_app!(common::test_service_with_blacklist(vec!["https://mydomain.com"]).await);
+
+    let req = test::TestRequest::post()
+        .uri("/shorten?url=https://example.com")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = test::read_body(resp).await;
+    assert_eq!(body.len(), 5, "id body should be 5 chars, got {body:?}");
+}
+
+#[actix_web::test]
 async fn get_existing_id_redirects_to_full_url() {
     let service = common::test_service().await;
     let id = service.shorten_url("https://example.com").await.unwrap();
