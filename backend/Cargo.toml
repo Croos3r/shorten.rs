@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+actix-cors = "0.7.1"
 actix-web = "4.13.0"
 actix-web-validator = "7.0.0"
 anyhow = "1.0.102"
+dotenv = "0.15.0"
 rand = "0.10.1"
 regex = "1.12.3"
 serde = { version = "1.0.228", features = ["derive"] }
