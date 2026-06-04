@@ -8,7 +8,7 @@ async fn test_pool_applies_migrations_and_starts_empty() {
     let service = common::test_service().await;
 
     let missing = service
-        .find_by_id("nope")
+        .find_shortened_url_by_id("nope")
         .await
         .expect("query against migrated schema should succeed");
 

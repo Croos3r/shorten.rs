@@ -18,7 +18,7 @@ async fn shorten_url_stores_and_returns_retrievable_id() {
     assert_eq!(id.len(), ID_LEN);
 
     let stored = service
-        .find_by_id(&id)
+        .find_shortened_url_by_id(&id)
         .await
         .expect("find_by_id should succeed")
         .expect("the freshly shortened url should be found");
@@ -50,11 +50,21 @@ async fn shorten_url_gives_distinct_ids_to_distinct_urls() {
 
     // Both must be independently retrievable.
     assert_eq!(
-        service.find_by_id(&a).await.unwrap().unwrap().full_url,
+        service
+            .find_shortened_url_by_id(&a)
+            .await
+            .unwrap()
+            .unwrap()
+            .full_url,
         "https://a.example"
     );
     assert_eq!(
-        service.find_by_id(&b).await.unwrap().unwrap().full_url,
+        service
+            .find_shortened_url_by_id(&b)
+            .await
+            .unwrap()
+            .unwrap()
+            .full_url,
         "https://b.example"
     );
 }
@@ -64,7 +74,7 @@ async fn find_by_id_returns_none_for_unknown_id() {
     let service = common::test_service().await;
 
     let result = service
-        .find_by_id("missing")
+        .find_shortened_url_by_id("missing")
         .await
         .expect("find_by_id should succeed even for unknown ids");
 
@@ -77,13 +87,43 @@ async fn increment_visit_by_id_increases_the_counter() {
     let id = service.shorten_url("https://example.com").await.unwrap();
 
     // A freshly shortened url starts with zero visits.
-    assert_eq!(service.find_by_id(&id).await.unwrap().unwrap().visits, 0);
+    assert_eq!(
+        service
+            .find_shortened_url_by_id(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .visits,
+        0
+    );
 
-    service.increment_visit_by_id(&id).await.unwrap();
-    assert_eq!(service.find_by_id(&id).await.unwrap().unwrap().visits, 1);
+    service
+        .increment_shortened_url_visits_by_id(&id)
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .find_shortened_url_by_id(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .visits,
+        1
+    );
 
-    service.increment_visit_by_id(&id).await.unwrap();
-    assert_eq!(service.find_by_id(&id).await.unwrap().unwrap().visits, 2);
+    service
+        .increment_shortened_url_visits_by_id(&id)
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .find_shortened_url_by_id(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .visits,
+        2
+    );
 }
 
 #[actix_web::test]
@@ -92,11 +132,17 @@ async fn increment_visit_by_id_is_a_noop_for_unknown_id() {
 
     // Updating a non-existent row succeeds (0 rows affected) and creates nothing.
     service
-        .increment_visit_by_id("missing")
+        .increment_shortened_url_visits_by_id("missing")
         .await
         .expect("incrementing an unknown id should not error");
 
-    assert!(service.find_by_id("missing").await.unwrap().is_none());
+    assert!(
+        service
+            .find_shortened_url_by_id("missing")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[actix_web::test]
@@ -179,7 +225,11 @@ async fn shorten_url_does_not_persist_a_blacklisted_url() {
         .shorten_url("https://example.com")
         .await
         .expect("a non-blacklisted url should still be shortenable");
-    let stored = service.find_by_id(&id).await.unwrap().unwrap();
+    let stored = service
+        .find_shortened_url_by_id(&id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(stored.full_url, "https://example.com");
 }
 

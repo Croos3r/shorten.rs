@@ -1,8 +1,12 @@
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    time::{Duration, SystemTime},
+};
 
 use actix_web::HttpResponse;
 use anyhow::{Context, Result, bail};
 use rand::distr::{Alphanumeric, SampleString};
+use sqlx::{Executor, Sqlite};
 
 use crate::DatabasePool;
 
@@ -13,6 +17,7 @@ pub struct ShortenedUrl {
     pub id: String,
     pub full_url: String,
     pub visits: u32,
+    pub expire_at: SystemTime,
 }
 
 impl Display for ShortenedUrl {
@@ -29,19 +34,151 @@ impl ShortenedUrl {
             id,
             full_url: url.into(),
             visits: 0,
+            expire_at: SystemTime::now() + Duration::from_hours(24),
         }
     }
 
     pub fn from_parts(
         id: impl Into<String>,
-        url: impl Into<String>,
+        full_url: impl Into<String>,
         visits: impl Into<u32>,
+        expire_at: impl Into<SystemTime>,
     ) -> Self {
         Self {
             id: id.into(),
-            full_url: url.into(),
+            full_url: full_url.into(),
             visits: visits.into(),
+            expire_at: expire_at.into(),
         }
+    }
+
+    pub async fn save(&self, executor: impl Executor<'_, Database = Sqlite>) -> Result<()> {
+        sqlx::query!(
+            "INSERT INTO shortened_urls VALUES (?, ?, ?, ?)",
+            self.id,
+            self.full_url,
+            self.visits,
+            self.expire_at
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as u32
+        )
+        .execute(executor)
+        .await
+        .map(|_| ())
+        .context("Could not save {self}")
+    }
+
+    pub async fn increment_visits_by_id(
+        id: impl Into<&str>,
+        executor: impl Executor<'_, Database = Sqlite>,
+    ) -> Result<()> {
+        let id = id.into();
+        sqlx::query!(
+            "UPDATE shortened_urls SET visits = visits + 1 WHERE id = ?",
+            id,
+        )
+        .execute(executor)
+        .await
+        .map(|_| ())
+        .context(format!("Could not increment visits of {id}"))
+    }
+
+    pub async fn find_by_url(
+        url: impl Into<&str>,
+        executor: impl Executor<'_, Database = Sqlite>,
+    ) -> Result<Option<ShortenedUrl>> {
+        let url = url.into();
+
+        sqlx::query!(
+                "SELECT * FROM shortened_urls WHERE full_url = ? AND expire_at > unixepoch(current_timestamp) LIMIT 1", 
+                url
+            )
+            .fetch_optional(executor)
+        .await
+        .map(|record| {
+            record.map(|record| {
+                ShortenedUrl::from_parts(
+                    record.id,
+                    record.full_url,
+                    record.visits as u32,
+                    SystemTime::UNIX_EPOCH + Duration::from_secs(record.expire_at as u64),
+                )
+            })
+        })
+        .context(format!("Could not get shortened url for {url}"))
+    }
+
+    pub async fn find_by_url_with_expired(
+        url: impl Into<&str>,
+        executor: impl Executor<'_, Database = Sqlite>,
+    ) -> Result<Option<ShortenedUrl>> {
+        let url = url.into();
+
+        sqlx::query!(
+            "SELECT * FROM shortened_urls WHERE full_url = ? LIMIT 1",
+            url
+        )
+        .fetch_optional(executor)
+        .await
+        .map(|record| {
+            record.map(|record| {
+                ShortenedUrl::from_parts(
+                    record.id,
+                    record.full_url,
+                    record.visits as u32,
+                    SystemTime::UNIX_EPOCH + Duration::from_secs(record.expire_at as u64),
+                )
+            })
+        })
+        .context(format!("Could not get shortened url for {url}"))
+    }
+
+    pub async fn find_by_id(
+        id: impl Into<&str>,
+        executor: impl Executor<'_, Database = Sqlite>,
+    ) -> Result<Option<Self>> {
+        let id = id.into();
+
+        sqlx::query!(
+            "SELECT * FROM shortened_urls WHERE id = ? AND expire_at > unixepoch(current_timestamp) LIMIT 1",
+            id
+        )
+        .fetch_optional(executor)
+        .await
+        .map(|record| {
+            record.map(|record| {
+                ShortenedUrl::from_parts(
+                    record.id,
+                    record.full_url,
+                    record.visits as u32,
+                    SystemTime::UNIX_EPOCH + Duration::from_secs(record.expire_at as u64),
+                )
+            })
+        })
+        .context(format!("Could not get shortened url for {id}"))
+    }
+
+    pub async fn find_by_id_with_expired(
+        id: impl Into<&str>,
+        executor: impl Executor<'_, Database = Sqlite>,
+    ) -> Result<Option<Self>> {
+        let id = id.into();
+
+        sqlx::query!("SELECT * FROM shortened_urls WHERE id = ? LIMIT 1", id)
+            .fetch_optional(executor)
+            .await
+            .map(|record| {
+                record.map(|record| {
+                    ShortenedUrl::from_parts(
+                        record.id,
+                        record.full_url,
+                        record.visits as u32,
+                        SystemTime::UNIX_EPOCH + Duration::from_secs(record.expire_at as u64),
+                    )
+                })
+            })
+            .context(format!("Could not get shortened url for {id}"))
     }
 }
 
@@ -94,49 +231,21 @@ impl UrlShortenerService {
             bail!(ShortenUrlError::BlacklistedUrl)
         }
 
-        if let Some(existing_shortened_url) = sqlx::query!(
-            "SELECT id FROM shortened_urls WHERE full_url = ? LIMIT 1",
-            url
-        )
-        .fetch_optional(&self.db_pool)
-        .await?
-        {
+        if let Some(existing_shortened_url) = ShortenedUrl::find_by_url(url, &self.db_pool).await? {
             return Ok(existing_shortened_url.id);
         }
 
         let new_shortened_url = ShortenedUrl::new(url);
-        sqlx::query!(
-            "INSERT INTO shortened_urls VALUES (?, ?, ?)",
-            new_shortened_url.id,
-            new_shortened_url.full_url,
-            new_shortened_url.visits
-        )
-        .execute(&self.db_pool)
-        .await?;
+        new_shortened_url.save(&self.db_pool).await?;
         Ok(new_shortened_url.id)
     }
 
-    pub async fn find_by_id(&self, id: &str) -> Result<Option<ShortenedUrl>> {
-        sqlx::query!("SELECT * FROM shortened_urls WHERE id = ? LIMIT 1", id)
-            .fetch_optional(&self.db_pool)
-            .await
-            .map(|record| {
-                record.map(|record| {
-                    ShortenedUrl::from_parts(record.id, record.full_url, record.visits as u32)
-                })
-            })
-            .context(format!("Could not get shortened url for {id}"))
+    pub async fn find_shortened_url_by_id(&self, id: &str) -> Result<Option<ShortenedUrl>> {
+        ShortenedUrl::find_by_id(id, &self.db_pool).await
     }
 
-    pub async fn increment_visit_by_id(&self, id: &str) -> Result<()> {
-        sqlx::query!(
-            "UPDATE shortened_urls SET visits = visits + 1 WHERE id = ?",
-            id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map(|_| ())
-        .context(format!("Could not increment visits of {id}"))
+    pub async fn increment_shortened_url_visits_by_id(&self, id: &str) -> Result<()> {
+        ShortenedUrl::increment_visits_by_id(id, &self.db_pool).await
     }
 }
 

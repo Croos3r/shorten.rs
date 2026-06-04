@@ -157,7 +157,12 @@ async fn redirect_increments_visit_counter() {
         assert_eq!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
     }
 
-    let visits = service.find_by_id(&id).await.unwrap().unwrap().visits;
+    let visits = service
+        .find_shortened_url_by_id(&id)
+        .await
+        .unwrap()
+        .unwrap()
+        .visits;
     assert_eq!(
         visits, 2,
         "each redirect should increment the visit counter"

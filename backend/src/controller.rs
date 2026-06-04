@@ -32,13 +32,13 @@ pub async fn redirect_to_url_for_id(
     url_shortener_service: Data<UrlShortenerService>,
 ) -> impl Responder {
     let id = id.into_inner();
-    let shortened_url = match url_shortener_service.find_by_id(&id).await {
+    let shortened_url = match url_shortener_service.find_shortened_url_by_id(&id).await {
         Ok(Some(shortened_url)) => shortened_url,
         Ok(None) => return HttpResponse::NotFound().body("No url for this id"),
         Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
     };
     let _ = url_shortener_service
-        .increment_visit_by_id(&id)
+        .increment_shortened_url_visits_by_id(&id)
         .await
         .map_err(|err| eprintln!("Could not increment visits of {id}: {err}"));
     HttpResponse::TemporaryRedirect()
