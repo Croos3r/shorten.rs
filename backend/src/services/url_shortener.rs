@@ -278,15 +278,31 @@ mod tests {
 
     #[test]
     fn from_parts_sets_all_fields() {
-        let shortened = ShortenedUrl::from_parts("abc12", "https://example.com", 7u32);
+        let expire_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let shortened = ShortenedUrl::from_parts("abc12", "https://example.com", 7u32, expire_at);
         assert_eq!(shortened.id, "abc12");
         assert_eq!(shortened.full_url, "https://example.com");
         assert_eq!(shortened.visits, 7);
+        assert_eq!(shortened.expire_at, expire_at);
+    }
+
+    #[test]
+    fn new_sets_expire_at_about_24_hours_in_the_future() {
+        let before = SystemTime::now();
+        let shortened = ShortenedUrl::new("https://example.com");
+        let after = SystemTime::now();
+
+        // The expiry is "now + 24h"; bracket it by the clock readings taken
+        // immediately before and after construction so the assertion holds
+        // regardless of how much time elapsed in between.
+        assert!(shortened.expire_at >= before + Duration::from_hours(24));
+        assert!(shortened.expire_at <= after + Duration::from_hours(24));
     }
 
     #[test]
     fn display_formats_as_id_colon_url() {
-        let shortened = ShortenedUrl::from_parts("abc12", "https://example.com", 0u32);
+        let shortened =
+            ShortenedUrl::from_parts("abc12", "https://example.com", 0u32, SystemTime::now());
         assert_eq!(shortened.to_string(), "abc12: https://example.com");
     }
 

@@ -3,7 +3,9 @@
 
 mod common;
 
-use shorten_rs::services::url_shortener::ShortenUrlError;
+use std::time::{Duration, SystemTime};
+
+use shorten_rs::services::url_shortener::{ShortenUrlError, ShortenedUrl, UrlShortenerService};
 
 const ID_LEN: usize = 5;
 
@@ -242,4 +244,140 @@ async fn shorten_url_allows_urls_outside_the_blacklist() {
         .await
         .expect("a url outside the blacklist should be shortenable");
     assert_eq!(id.len(), ID_LEN);
+}
+
+// --- Expiration -----------------------------------------------------------
+//
+// `find_by_id`/`find_by_url` (used by the service) only return rows whose
+// `expire_at` is still in the future; the `_with_expired` variants ignore the
+// expiry. These tests seed rows directly through `ShortenedUrl::save` so we can
+// control `expire_at` precisely, including times in the past.
+
+/// Persists a single url with an explicit expiry, returning a service backed by
+/// the same pool plus the pool itself for direct lookups.
+async fn service_with_seeded_url(
+    id: &str,
+    url: &str,
+    expire_at: SystemTime,
+) -> (UrlShortenerService, shorten_rs::DatabasePool) {
+    let pool = common::test_pool().await;
+    ShortenedUrl::from_parts(id, url, 0u32, expire_at)
+        .save(&pool)
+        .await
+        .expect("seeding a row should succeed");
+    let service = UrlShortenerService::new(pool.clone(), vec![]);
+    (service, pool)
+}
+
+#[actix_web::test]
+async fn find_by_id_hides_an_expired_url() {
+    let past = SystemTime::now() - Duration::from_secs(60);
+    let (service, _pool) = service_with_seeded_url("exprd", "https://expired.example", past).await;
+
+    let found = service
+        .find_shortened_url_by_id("exprd")
+        .await
+        .expect("query should succeed");
+    assert!(found.is_none(), "an expired url must not be returned");
+}
+
+#[actix_web::test]
+async fn find_by_id_returns_a_not_yet_expired_url() {
+    let future = SystemTime::now() + Duration::from_secs(3600);
+    let (service, _pool) = service_with_seeded_url("alive", "https://alive.example", future).await;
+
+    let found = service
+        .find_shortened_url_by_id("alive")
+        .await
+        .expect("query should succeed")
+        .expect("a url that has not expired must still be returned");
+    assert_eq!(found.full_url, "https://alive.example");
+}
+
+#[actix_web::test]
+async fn find_by_id_with_expired_still_returns_an_expired_url() {
+    let past = SystemTime::now() - Duration::from_secs(60);
+    let (_service, pool) = service_with_seeded_url("exprd", "https://expired.example", past).await;
+
+    let found = ShortenedUrl::find_by_id_with_expired("exprd", &pool)
+        .await
+        .expect("query should succeed")
+        .expect("the *_with_expired variant must ignore expiry");
+    assert_eq!(found.full_url, "https://expired.example");
+}
+
+#[actix_web::test]
+async fn find_by_url_with_expired_still_returns_an_expired_url() {
+    let past = SystemTime::now() - Duration::from_secs(60);
+    let (_service, pool) = service_with_seeded_url("exprd", "https://expired.example", past).await;
+
+    let found = ShortenedUrl::find_by_url_with_expired("https://expired.example", &pool)
+        .await
+        .expect("query should succeed")
+        .expect("the *_with_expired variant must ignore expiry");
+    assert_eq!(found.id, "exprd");
+}
+
+#[actix_web::test]
+async fn shorten_url_does_not_deduplicate_onto_an_expired_entry() {
+    // Dedup keys off `find_by_url`, which excludes expired rows, so shortening a
+    // url whose only existing entry has expired must mint a fresh id rather than
+    // resurrect the dead one.
+    let past = SystemTime::now() - Duration::from_secs(60);
+    let (service, _pool) = service_with_seeded_url("exprd", "https://reuse.example", past).await;
+
+    let new_id = service
+        .shorten_url("https://reuse.example")
+        .await
+        .expect("shortening should succeed");
+
+    assert_ne!(
+        new_id, "exprd",
+        "an expired entry must not be reused for dedup"
+    );
+    // The freshly minted id is retrievable; the expired one remains hidden.
+    assert_eq!(
+        service
+            .find_shortened_url_by_id(&new_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .full_url,
+        "https://reuse.example"
+    );
+}
+
+#[actix_web::test]
+async fn re_shortening_a_valid_url_does_not_extend_its_expiry() {
+    // Dedup is a *fixed* window, not a sliding one: shortening a url that
+    // already has a live entry returns the existing id without touching
+    // `expire_at`. This pins that behaviour so a switch to sliding TTL can't
+    // happen silently.
+    let future = SystemTime::now() + Duration::from_secs(3600);
+    let (service, _pool) = service_with_seeded_url("ttlid", "https://ttl.example", future).await;
+
+    // Read the persisted (second-granularity) expiry before re-shortening.
+    let before = service
+        .find_shortened_url_by_id("ttlid")
+        .await
+        .unwrap()
+        .unwrap()
+        .expire_at;
+
+    let id = service
+        .shorten_url("https://ttl.example")
+        .await
+        .expect("shortening should succeed");
+    assert_eq!(id, "ttlid", "a live entry should be reused for dedup");
+
+    let after = service
+        .find_shortened_url_by_id("ttlid")
+        .await
+        .unwrap()
+        .unwrap()
+        .expire_at;
+    assert_eq!(
+        before, after,
+        "re-shortening a still-valid url must not extend its expiry"
+    );
 }

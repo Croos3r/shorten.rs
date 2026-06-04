@@ -3,6 +3,8 @@
 
 mod common;
 
+use std::time::{Duration, SystemTime};
+
 use actix_web::{
     App,
     http::{StatusCode, header},
@@ -10,6 +12,7 @@ use actix_web::{
     web::Data,
 };
 use shorten_rs::configure;
+use shorten_rs::services::url_shortener::{ShortenedUrl, UrlShortenerService};
 
 /// Initialises an Actix test app wired to the given service.
 ///
@@ -115,6 +118,33 @@ async fn get_unknown_id_returns_404() {
     let resp = test::call_service(&app, req).await;
 
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[actix_web::test]
+async fn get_expired_id_returns_404() {
+    // Seed a row whose expiry is already in the past, then drive it through the
+    // real route: an expired short link must behave like an unknown one (404),
+    // never redirect.
+    let pool = common::test_pool().await;
+    ShortenedUrl::from_parts(
+        "exprd",
+        "https://expired.example",
+        0u32,
+        SystemTime::now() - Duration::from_secs(60),
+    )
+    .save(&pool)
+    .await
+    .expect("seeding an expired row should succeed");
+    let app = init_app!(UrlShortenerService::new(pool, vec![]));
+
+    let req = test::TestRequest::get().uri("/exprd").to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "an expired link must not redirect"
+    );
 }
 
 #[actix_web::test]
