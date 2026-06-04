@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS users
+(
+	name			VARCHAR(255)		PRIMARY	KEY	NOT	NULL,
+	email			VARCHAR(255)					NOT NULL,
+	hashed_password	VARCHAR(255)					NOT NULL,
+	registered_at	UNSIGNED INTEGER				NOT NULL
+);
