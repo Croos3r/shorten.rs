@@ -15,15 +15,18 @@ pub async fn shorten_url(
     query: Query<ShortenUrlDto>,
 ) -> impl Responder {
     let url = query.into_inner().url;
-    match url_shortener_service.shorten_url(&url).await {
-        Ok(id) => HttpResponse::Ok().body(id),
-        Err(err) => err
-            .downcast::<ShortenUrlError>()
-            .map(ShortenUrlError::into)
-            .unwrap_or_else(|_| {
-                HttpResponse::InternalServerError().body("An unknown error has occured")
-            }),
-    }
+    url_shortener_service
+        .shorten_url(&url)
+        .await
+        .map(|id| HttpResponse::Ok().body(id))
+        .map_err(|err| {
+            err.downcast::<ShortenUrlError>()
+                .map(ShortenUrlError::into)
+                .unwrap_or_else(|_| {
+                    HttpResponse::InternalServerError().body("An unknown error has occured")
+                })
+        })
+        .unwrap_or_else(|e| e)
 }
 
 #[get("/{id}")]

@@ -59,14 +59,13 @@ impl ShortenedUrl {
             self.full_url,
             self.visits,
             self.expire_at
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_secs() as u32
         )
         .execute(executor)
         .await
         .map(|_| ())
-        .context("Could not save {self}")
+        .context(format!("Could not save {self}"))
     }
 
     pub async fn increment_visits_by_id(
