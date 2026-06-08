@@ -12,9 +12,8 @@ use crate::{
 #[post("/shorten")]
 pub async fn shorten_url(
     url_shortener_service: Data<UrlShortenerService>,
-    query: Query<ShortenUrlDto>,
+    Query(ShortenUrlDto { url }): Query<ShortenUrlDto>,
 ) -> impl Responder {
-    let url = query.into_inner().url;
     url_shortener_service
         .shorten_url(&url)
         .await
@@ -34,7 +33,6 @@ pub async fn redirect_to_url_for_id(
     id: Path<String>,
     url_shortener_service: Data<UrlShortenerService>,
 ) -> impl Responder {
-    let id = id.into_inner();
     let shortened_url = match url_shortener_service.find_shortened_url_by_id(&id).await {
         Ok(Some(shortened_url)) => shortened_url,
         Ok(None) => return HttpResponse::NotFound().body("No url for this id"),
