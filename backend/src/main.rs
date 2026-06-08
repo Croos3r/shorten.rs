@@ -1,10 +1,17 @@
 use std::{env, str::FromStr};
 
 use actix_cors::Cors;
-use actix_web::{App, HttpServer, web::Data};
+use actix_session::{SessionMiddleware, storage::CookieSessionStore};
+use actix_web::{App, HttpServer, cookie::Key, web::Data};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
-use shorten_rs::{configure, services::url_shortener::UrlShortenerService};
+use shorten_rs::{
+    configure,
+    services::{
+        authentication::AuthenticationService, url_shortener::UrlShortenerService,
+        users::UsersService,
+    },
+};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -18,6 +25,15 @@ async fn main() -> std::io::Result<()> {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(8080);
+
+    let session_secret_key_raw =
+        env::var("SESSION_SECRET_KEY").expect("SESSION_SECRET_KEY must be set");
+    let session_secret_key =
+        Key::try_from(session_secret_key_raw.as_bytes()).unwrap_or_else(|err| {
+            eprintln!("Could not use SESSION_SECRET_KEY: {err}");
+            eprintln!("Generating random one...");
+            Key::generate()
+        });
 
     let options = SqliteConnectOptions::from_str(&database_url)
         .expect("DATABASE_URL is not a valid SQLite connection string")
@@ -44,10 +60,18 @@ async fn main() -> std::io::Result<()> {
         .expect("failed to run database migrations");
 
     let url_shortener_service = UrlShortenerService::new(pool.clone(), blacklisted_urls);
+    let users_service = UsersService::new(pool.clone());
+    let authentication_service = AuthenticationService::new(pool.clone());
     HttpServer::new(move || {
         App::new()
             .wrap(Cors::default().allow_any_origin())
+            .wrap(SessionMiddleware::new(
+                CookieSessionStore::default(),
+                session_secret_key.clone(),
+            ))
             .app_data(Data::new(url_shortener_service.clone()))
+            .app_data(Data::new(users_service.clone()))
+            .app_data(Data::new(authentication_service.clone()))
             .configure(configure)
     })
     .bind((host, port))?

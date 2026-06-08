@@ -1,3 +1,4 @@
+use actix_session::Session;
 use actix_web::{
     HttpResponse, Responder, get, http, post,
     web::{Data, Path},
@@ -5,8 +6,12 @@ use actix_web::{
 use actix_web_validator::Query;
 
 use crate::{
-    ShortenUrlDto,
-    services::url_shortener::{ShortenUrlError, UrlShortenerService},
+    dtos::{LoginDto, RegisterDto, ShortenUrlDto},
+    services::{
+        authentication::{AuthenticationService, UserRegistrationError},
+        url_shortener::{ShortenUrlError, UrlShortenerService},
+        users::User,
+    },
 };
 
 #[post("/shorten")]
@@ -45,4 +50,60 @@ pub async fn redirect_to_url_for_id(
     HttpResponse::TemporaryRedirect()
         .insert_header((http::header::LOCATION, shortened_url.full_url.clone()))
         .body(format!("Redirecting to {}...", shortened_url.full_url))
+}
+
+#[post("/register")]
+pub async fn register(
+    authentication_service: Data<AuthenticationService>,
+    Query(RegisterDto {
+        name,
+        email,
+        password,
+        ..
+    }): Query<RegisterDto>,
+) -> impl Responder {
+    if let Err(err) = authentication_service
+        .register_user(name, &email, &*password)
+        .await
+    {
+        if let Ok(err) = err.downcast::<UserRegistrationError>() {
+            return err.into();
+        } else {
+            return HttpResponse::InternalServerError().body("An error occurred");
+        }
+    }
+
+    HttpResponse::Ok().finish()
+}
+
+#[post("/login")]
+pub async fn login(
+    authentication_service: Data<AuthenticationService>,
+    Query(LoginDto { email, password }): Query<LoginDto>,
+    session: Session,
+) -> impl Responder {
+    let Some(User { email, .. }) = authentication_service
+        .authenticate_credentials(email, password.as_bytes())
+        .await
+    else {
+        return HttpResponse::NotFound().body("Could not find an user for those credentials");
+    };
+
+    if let Err(err) = session.insert("email", email) {
+        return HttpResponse::InternalServerError().body(format!("Could not apply cookies: {err}"));
+    }
+
+    HttpResponse::Ok().finish()
+}
+
+#[get("/logout")]
+pub async fn logout(session: Session) -> impl Responder {
+    match session.get::<String>("email") {
+        Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
+        Ok(None) => HttpResponse::Unauthorized().body("You are not logged in"),
+        Ok(Some(email)) => {
+            session.purge();
+            HttpResponse::Ok().body(format!("Logged out from {email}"))
+        }
+    }
 }
