@@ -169,4 +169,12 @@ impl UsersService {
     pub async fn get_users_page(&self, page: u32) -> Result<Vec<User>> {
         User::get_users_page(page, USER_PAGE_SIZE, &self.db_pool).await
     }
+
+    pub async fn find_user_by_name(&self, name: impl Into<String>) -> Result<Option<User>> {
+        User::find_by_name(name, &self.db_pool).await
+    }
+
+    pub async fn find_user_by_email(&self, email: impl Into<String>) -> Result<Option<User>> {
+        User::find_by_email(email, &self.db_pool).await
+    }
 }
