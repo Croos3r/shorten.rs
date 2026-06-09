@@ -2,7 +2,8 @@ use std::{env, str::FromStr};
 
 use actix_cors::Cors;
 use actix_session::{SessionMiddleware, storage::CookieSessionStore};
-use actix_web::{App, HttpServer, cookie::Key, web::Data};
+use actix_web::{App, HttpServer, cookie::Key, middleware::Logger, web::Data};
+use env_logger::Env;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 use shorten_rs::{
@@ -18,6 +19,7 @@ async fn main() -> std::io::Result<()> {
     // Configurable via environment so the same binary runs locally and in a
     // container. Defaults preserve the original local behaviour.
     dotenv::dotenv().ok();
+    env_logger::init_from_env(Env::default().default_filter_or("info"));
     let database_url =
         env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:database.sqlite".to_string());
     let host = env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
@@ -64,6 +66,7 @@ async fn main() -> std::io::Result<()> {
     let authentication_service = AuthenticationService::new(pool.clone());
     HttpServer::new(move || {
         App::new()
+            .wrap(Logger::default())
             .wrap(Cors::default().allow_any_origin())
             .wrap(SessionMiddleware::new(
                 CookieSessionStore::default(),
