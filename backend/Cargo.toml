@@ -11,6 +11,8 @@ actix-web-validator = "7.0.0"
 anyhow = "1.0.102"
 argon2 = { version = "0.5.3", features = ["rand", "simple", "password-hash", "std"] }
 dotenv = "0.15.0"
+env_logger = "0.11.10"
+futures-util = "0.3.32"
 getrandom = { version = "0.4.2", features = ["std", "sys_rng"] }
 rand = "0.10.1"
 rand_core = "0.6.4"
