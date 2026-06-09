@@ -2,6 +2,7 @@
 // not part of the supported public API.
 mod controller;
 pub mod dtos;
+pub mod extractors;
 pub mod services;
 
 use actix_web::web::ServiceConfig;
