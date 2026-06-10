@@ -10,6 +10,7 @@
 
 use shorten_rs::DatabasePool;
 use shorten_rs::services::url_shortener::UrlShortenerService;
+use shorten_rs::services::users::{User, UsersService};
 use sqlx::sqlite::SqlitePoolOptions;
 
 /// Builds a fresh, isolated in-memory SQLite pool with all migrations applied.
@@ -42,4 +43,25 @@ pub async fn test_service_with_blacklist(
 ) -> UrlShortenerService {
     let blacklisted_urls = blacklisted_urls.into_iter().map(Into::into).collect();
     UrlShortenerService::new(test_pool().await, blacklisted_urls)
+}
+
+/// A [`UsersService`] backed by a fresh in-memory database containing no users.
+pub async fn test_users_service() -> UsersService {
+    UsersService::new(test_pool().await)
+}
+
+/// Like [`test_users_service`] but seeded with a single user, so the
+/// authenticated-user extractor has someone to look up by email.
+pub async fn test_users_service_with_user(
+    name: impl Into<String>,
+    email: impl Into<String>,
+    password: &str,
+) -> UsersService {
+    let pool = test_pool().await;
+    User::new(name, email, password)
+        .expect("building a test user should succeed")
+        .save(&pool)
+        .await
+        .expect("seeding a test user should succeed");
+    UsersService::new(pool)
 }
