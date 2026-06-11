@@ -230,10 +230,6 @@ impl UrlShortenerService {
             bail!(ShortenUrlError::BlacklistedUrl)
         }
 
-        if let Some(existing_shortened_url) = ShortenedUrl::find_by_url(url, &self.db_pool).await? {
-            return Ok(existing_shortened_url.id);
-        }
-
         let new_shortened_url = ShortenedUrl::new(url);
         new_shortened_url.save(&self.db_pool).await?;
         Ok(new_shortened_url.id)
