@@ -13,8 +13,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  lint-and-test:
-    name: Lint & Test
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -36,7 +36,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       # sqlx verifies `query!` macros against a real database at compile time,
-      # so clippy and the tests need a migrated SQLite database to build.
+      # so clippy needs a migrated SQLite database to build.
       - name: Set up SQLite database
         run: |
           DB_PATH="$PWD/ci.sqlite"
@@ -45,9 +45,6 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
-
-      - name: Test
-        run: cargo test --all-targets
 
   release-build:
     name: Release Build
@@ -74,8 +71,8 @@ jobs:
       - name: Build (release)
         run: cargo build --release
 
-  coverage:
-    name: Coverage
+  test:
+    name: Test & Coverage
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -103,7 +100,10 @@ jobs:
           for f in migrations/*.sql; do sqlite3 "$DB_PATH" < "$f"; done
           echo "DATABASE_URL=sqlite:$DB_PATH" >> "$GITHUB_ENV"
 
-      - name: Collect coverage
+      # cargo-llvm-cov compiles and runs the full test suite while instrumenting,
+      # so this step is both the test gate (it fails on any test failure) and the
+      # coverage collector, avoiding a second compile + test pass.
+      - name: Run tests and collect coverage
         run: cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info
 
       - name: Write coverage summary
