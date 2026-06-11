@@ -7,6 +7,7 @@ use actix_web_validator::Query;
 
 use crate::{
     dtos::{LoginDto, RegisterDto, ShortenUrlDto},
+    extractors::authenticated_user::AuthenticatedUser,
     services::{
         authentication::{AuthenticationService, UserRegistrationError},
         url_shortener::{ShortenUrlError, UrlShortenerService},
@@ -17,10 +18,12 @@ use crate::{
 #[post("/shorten")]
 pub async fn shorten_url(
     url_shortener_service: Data<UrlShortenerService>,
-    Query(ShortenUrlDto { url }): Query<ShortenUrlDto>,
+    Query(ShortenUrlDto { url, expire_in, .. }): Query<ShortenUrlDto>,
+    AuthenticatedUser(user): AuthenticatedUser,
 ) -> impl Responder {
+    let expire_in = user.and(expire_in).unwrap_or_default();
     url_shortener_service
-        .shorten_url(&url)
+        .shorten_url(&url, expire_in)
         .await
         .map(|id| HttpResponse::Ok().body(id))
         .map_err(|err| {

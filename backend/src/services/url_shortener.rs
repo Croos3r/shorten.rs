@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use rand::distr::{Alphanumeric, SampleString};
 use sqlx::{Executor, Sqlite};
 
-use crate::DatabasePool;
+use crate::{DatabasePool, dtos::ExpirationOptions};
 
 const ID_SIZE: u8 = 5;
 
@@ -27,14 +27,14 @@ impl Display for ShortenedUrl {
 }
 
 impl ShortenedUrl {
-    pub fn new(url: impl Into<String>) -> Self {
+    pub fn new(url: impl Into<String>, expire_in: impl Into<Duration>) -> Self {
         let mut rng = rand::rng();
         let id = Alphanumeric.sample_string(&mut rng, ID_SIZE as usize);
         Self {
             id,
             full_url: url.into(),
             visits: 0,
-            expire_at: SystemTime::now() + Duration::from_hours(24),
+            expire_at: SystemTime::now() + expire_in.into(),
         }
     }
 
@@ -225,12 +225,12 @@ impl UrlShortenerService {
             .any(|blacklisted_url| url.starts_with(blacklisted_url))
     }
 
-    pub async fn shorten_url(&self, url: &str) -> Result<String> {
+    pub async fn shorten_url(&self, url: &str, expire_in: ExpirationOptions) -> Result<String> {
         if self.is_blacklisted(url) {
             bail!(ShortenUrlError::BlacklistedUrl)
         }
 
-        let new_shortened_url = ShortenedUrl::new(url);
+        let new_shortened_url = ShortenedUrl::new(url, expire_in);
         new_shortened_url.save(&self.db_pool).await?;
         Ok(new_shortened_url.id)
     }
