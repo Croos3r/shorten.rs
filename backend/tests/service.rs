@@ -5,6 +5,7 @@ mod common;
 
 use std::time::{Duration, SystemTime};
 
+use shorten_rs::dtos::ExpirationOptions;
 use shorten_rs::services::url_shortener::{ShortenUrlError, ShortenedUrl, UrlShortenerService};
 
 const ID_LEN: usize = 5;
@@ -14,7 +15,7 @@ async fn shorten_url_stores_and_returns_retrievable_id() {
     let service = common::test_service().await;
 
     let id = service
-        .shorten_url("https://example.com")
+        .shorten_url("https://example.com", ExpirationOptions::Hour)
         .await
         .expect("shorten_url should succeed");
     assert_eq!(id.len(), ID_LEN);
@@ -29,24 +30,50 @@ async fn shorten_url_stores_and_returns_retrievable_id() {
 }
 
 #[actix_web::test]
-async fn shorten_url_deduplicates_identical_urls() {
+async fn shorten_url_gives_a_fresh_id_to_each_identical_url() {
+    // Deduplication was removed: shortening the same url twice now mints two
+    // independent entries rather than reusing the first id.
     let service = common::test_service().await;
 
-    let first = service.shorten_url("https://example.com").await.unwrap();
-    let second = service.shorten_url("https://example.com").await.unwrap();
+    let first = service
+        .shorten_url("https://example.com", ExpirationOptions::Hour)
+        .await
+        .unwrap();
+    let second = service
+        .shorten_url("https://example.com", ExpirationOptions::Hour)
+        .await
+        .unwrap();
 
-    assert_eq!(
+    assert_ne!(
         first, second,
-        "shortening the same url twice should return the same id"
+        "without dedup, the same url shortened twice should get distinct ids"
     );
+    for id in [&first, &second] {
+        assert_eq!(
+            service
+                .find_shortened_url_by_id(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .full_url,
+            "https://example.com",
+            "both freshly minted ids must resolve back to the original url"
+        );
+    }
 }
 
 #[actix_web::test]
 async fn shorten_url_gives_distinct_ids_to_distinct_urls() {
     let service = common::test_service().await;
 
-    let a = service.shorten_url("https://a.example").await.unwrap();
-    let b = service.shorten_url("https://b.example").await.unwrap();
+    let a = service
+        .shorten_url("https://a.example", ExpirationOptions::Hour)
+        .await
+        .unwrap();
+    let b = service
+        .shorten_url("https://b.example", ExpirationOptions::Hour)
+        .await
+        .unwrap();
 
     assert_ne!(a, b, "different urls should get different ids");
 
@@ -86,7 +113,10 @@ async fn find_by_id_returns_none_for_unknown_id() {
 #[actix_web::test]
 async fn increment_visit_by_id_increases_the_counter() {
     let service = common::test_service().await;
-    let id = service.shorten_url("https://example.com").await.unwrap();
+    let id = service
+        .shorten_url("https://example.com", ExpirationOptions::Hour)
+        .await
+        .unwrap();
 
     // A freshly shortened url starts with zero visits.
     assert_eq!(
@@ -201,7 +231,7 @@ async fn shorten_url_rejects_a_blacklisted_url() {
     let service = common::test_service_with_blacklist(vec!["https://mydomain.com"]).await;
 
     let err = service
-        .shorten_url("https://mydomain.com/self")
+        .shorten_url("https://mydomain.com/self", ExpirationOptions::Hour)
         .await
         .expect_err("shortening a blacklisted url should fail");
 
@@ -221,10 +251,12 @@ async fn shorten_url_does_not_persist_a_blacklisted_url() {
     // The blacklist check must short-circuit before any insert; shortening an
     // allowed url afterwards yields the very first generated id, proving no row
     // was written for the rejected one.
-    let _ = service.shorten_url("https://mydomain.com/self").await;
+    let _ = service
+        .shorten_url("https://mydomain.com/self", ExpirationOptions::Hour)
+        .await;
 
     let id = service
-        .shorten_url("https://example.com")
+        .shorten_url("https://example.com", ExpirationOptions::Hour)
         .await
         .expect("a non-blacklisted url should still be shortenable");
     let stored = service
@@ -240,7 +272,7 @@ async fn shorten_url_allows_urls_outside_the_blacklist() {
     let service = common::test_service_with_blacklist(vec!["https://mydomain.com"]).await;
 
     let id = service
-        .shorten_url("https://example.com")
+        .shorten_url("https://example.com", ExpirationOptions::Hour)
         .await
         .expect("a url outside the blacklist should be shortenable");
     assert_eq!(id.len(), ID_LEN);
@@ -319,21 +351,20 @@ async fn find_by_url_with_expired_still_returns_an_expired_url() {
 }
 
 #[actix_web::test]
-async fn shorten_url_does_not_deduplicate_onto_an_expired_entry() {
-    // Dedup keys off `find_by_url`, which excludes expired rows, so shortening a
-    // url whose only existing entry has expired must mint a fresh id rather than
-    // resurrect the dead one.
+async fn shorten_url_ignores_a_pre_existing_expired_entry_for_the_same_url() {
+    // With dedup gone, shortening always mints a fresh id; this pins that a stale
+    // expired row for the same url neither blocks the new entry nor resurfaces.
     let past = SystemTime::now() - Duration::from_secs(60);
     let (service, _pool) = service_with_seeded_url("exprd", "https://reuse.example", past).await;
 
     let new_id = service
-        .shorten_url("https://reuse.example")
+        .shorten_url("https://reuse.example", ExpirationOptions::Hour)
         .await
         .expect("shortening should succeed");
 
     assert_ne!(
         new_id, "exprd",
-        "an expired entry must not be reused for dedup"
+        "a fresh id must be minted, not the expired one"
     );
     // The freshly minted id is retrievable; the expired one remains hidden.
     assert_eq!(
@@ -345,14 +376,20 @@ async fn shorten_url_does_not_deduplicate_onto_an_expired_entry() {
             .full_url,
         "https://reuse.example"
     );
+    assert!(
+        service
+            .find_shortened_url_by_id("exprd")
+            .await
+            .unwrap()
+            .is_none(),
+        "the pre-existing expired entry must stay hidden"
+    );
 }
 
 #[actix_web::test]
-async fn re_shortening_a_valid_url_does_not_extend_its_expiry() {
-    // Dedup is a *fixed* window, not a sliding one: shortening a url that
-    // already has a live entry returns the existing id without touching
-    // `expire_at`. This pins that behaviour so a switch to sliding TTL can't
-    // happen silently.
+async fn re_shortening_a_valid_url_creates_a_new_entry_without_touching_the_original() {
+    // Without dedup, re-shortening a url that already has a live entry mints a
+    // *separate* entry and leaves the original's id and `expire_at` untouched.
     let future = SystemTime::now() + Duration::from_secs(3600);
     let (service, _pool) = service_with_seeded_url("ttlid", "https://ttl.example", future).await;
 
@@ -365,10 +402,13 @@ async fn re_shortening_a_valid_url_does_not_extend_its_expiry() {
         .expire_at;
 
     let id = service
-        .shorten_url("https://ttl.example")
+        .shorten_url("https://ttl.example", ExpirationOptions::Hour)
         .await
         .expect("shortening should succeed");
-    assert_eq!(id, "ttlid", "a live entry should be reused for dedup");
+    assert_ne!(
+        id, "ttlid",
+        "re-shortening should mint a new id, not reuse the live one"
+    );
 
     let after = service
         .find_shortened_url_by_id("ttlid")
@@ -378,6 +418,6 @@ async fn re_shortening_a_valid_url_does_not_extend_its_expiry() {
         .expire_at;
     assert_eq!(
         before, after,
-        "re-shortening a still-valid url must not extend its expiry"
+        "the original entry's expiry must be untouched by an unrelated new shorten"
     );
 }

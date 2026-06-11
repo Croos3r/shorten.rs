@@ -12,9 +12,15 @@ use actix_web::{
     web::Data,
 };
 use shorten_rs::configure;
+use shorten_rs::dtos::ExpirationOptions;
 use shorten_rs::services::url_shortener::{ShortenedUrl, UrlShortenerService};
 
-/// Initialises an Actix test app wired to the given service.
+/// Initialises an Actix test app wired to the given url-shortener service.
+///
+/// `/shorten` now runs the `AuthenticatedUser` extractor, which needs a
+/// `UsersService` in `app_data` even for anonymous requests, so a fresh empty
+/// one is always registered. No session cookie is sent, so the extractor
+/// resolves to an anonymous user.
 ///
 /// A macro rather than a function so we don't have to name Actix's nested
 /// `Service` return type (which references crates we don't depend on directly).
@@ -23,6 +29,7 @@ macro_rules! init_app {
         test::init_service(
             App::new()
                 .app_data(Data::new($service))
+                .app_data(Data::new(common::test_users_service().await))
                 .configure(configure),
         )
         .await
@@ -96,7 +103,10 @@ async fn post_shorten_allows_url_outside_blacklist() {
 #[actix_web::test]
 async fn get_existing_id_redirects_to_full_url() {
     let service = common::test_service().await;
-    let id = service.shorten_url("https://example.com").await.unwrap();
+    let id = service
+        .shorten_url("https://example.com", ExpirationOptions::Hour)
+        .await
+        .unwrap();
     let app = init_app!(service);
 
     let req = test::TestRequest::get().uri(&format!("/{id}")).to_request();
@@ -176,7 +186,7 @@ async fn redirect_increments_visit_counter() {
     // the same underlying pool as the copy moved into the app.
     let service = common::test_service().await;
     let id = service
-        .shorten_url("https://counted.example")
+        .shorten_url("https://counted.example", ExpirationOptions::Hour)
         .await
         .unwrap();
     let app = init_app!(service.clone());

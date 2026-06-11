@@ -78,3 +78,73 @@ pub struct LoginDto {
     pub(crate) email: String,
     pub(crate) password: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expiration_option_defaults_to_one_hour() {
+        assert!(matches!(
+            ExpirationOptions::default(),
+            ExpirationOptions::Hour
+        ));
+        assert_eq!(
+            Duration::from(ExpirationOptions::default()),
+            Duration::from_hours(1)
+        );
+    }
+
+    #[test]
+    fn named_expiration_options_convert_to_their_durations() {
+        assert_eq!(
+            Duration::from(ExpirationOptions::Hour),
+            Duration::from_hours(1)
+        );
+        assert_eq!(
+            Duration::from(ExpirationOptions::Day),
+            Duration::from_hours(24)
+        );
+        assert_eq!(
+            Duration::from(ExpirationOptions::Week),
+            Duration::from_hours(7 * 24)
+        );
+    }
+
+    #[test]
+    fn never_converts_to_the_maximum_duration() {
+        // `Never` maps to the largest representable duration rather than a fixed
+        // far-future date, so the conversion itself must be the saturating one.
+        assert_eq!(Duration::from(ExpirationOptions::Never), Duration::MAX);
+    }
+
+    #[test]
+    fn custom_expiration_passes_its_duration_through_unchanged() {
+        let ttl = Duration::from_secs(1234);
+        assert_eq!(Duration::from(ExpirationOptions::Custom(ttl)), ttl);
+    }
+
+    #[test]
+    fn named_expiration_options_deserialize_from_their_lowercase_names() {
+        // `#[serde(rename_all = "lowercase")]` is what lets a query string carry
+        // `expire_in=week`; lock that wire format in.
+        assert!(matches!(
+            serde_json::from_str::<ExpirationOptions>("\"hour\"").unwrap(),
+            ExpirationOptions::Hour
+        ));
+        assert!(matches!(
+            serde_json::from_str::<ExpirationOptions>("\"week\"").unwrap(),
+            ExpirationOptions::Week
+        ));
+        assert!(matches!(
+            serde_json::from_str::<ExpirationOptions>("\"never\"").unwrap(),
+            ExpirationOptions::Never
+        ));
+    }
+
+    #[test]
+    fn shorten_url_dto_treats_a_missing_expiration_as_none() {
+        let dto: ShortenUrlDto = serde_json::from_str(r#"{"url":"https://example.com"}"#).unwrap();
+        assert!(dto.expire_in.is_none());
+    }
+}
