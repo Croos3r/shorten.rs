@@ -21,7 +21,7 @@ impl FromRequest for AuthenticatedUser {
             let users_service = req
                 .app_data::<Data<UsersService>>()
                 .cloned()
-                .ok_or_else(|| ErrorInternalServerError(""))?;
+                .ok_or_else(|| ErrorInternalServerError("Could not get the users service"))?;
             let session = Session::from_request(&req, &mut payload).await?;
 
             if let Some(email) = session.get::<String>("email")? {
