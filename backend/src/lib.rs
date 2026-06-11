@@ -33,6 +33,7 @@ mod tests {
     fn dto(url: &str) -> ShortenUrlDto {
         ShortenUrlDto {
             url: url.to_string(),
+            expire_in: None,
         }
     }
 

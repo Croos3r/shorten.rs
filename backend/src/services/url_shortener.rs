@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn new_generates_five_char_alphanumeric_id() {
         let url = "https://example.com";
-        let shortened = ShortenedUrl::new(url);
+        let shortened = ShortenedUrl::new(url, ExpirationOptions::Hour);
         assert_eq!(shortened.id.len(), ID_SIZE as usize);
         assert!(shortened.id.chars().all(|c| c.is_ascii_alphanumeric()));
         assert_eq!(shortened.full_url, url);
@@ -264,9 +264,9 @@ mod tests {
         // relying on any two specific samples differing (which has a tiny but
         // non-zero collision chance for 5 alphanumeric chars). A working random
         // generator will virtually never produce the same id ten times.
-        let first = ShortenedUrl::new("https://example.com").id;
+        let first = ShortenedUrl::new("https://example.com", ExpirationOptions::Hour).id;
         let all_identical = (0..10)
-            .map(|_| ShortenedUrl::new("https://example.com").id)
+            .map(|_| ShortenedUrl::new("https://example.com", ExpirationOptions::Hour).id)
             .all(|id| id == first);
         assert!(!all_identical, "id generator appears to be constant");
     }
@@ -282,16 +282,34 @@ mod tests {
     }
 
     #[test]
-    fn new_sets_expire_at_about_24_hours_in_the_future() {
+    fn new_sets_expire_at_from_the_given_expiration_option() {
+        // `new` no longer hard-codes a 24h TTL; it now adds whatever expiration
+        // the caller passes. Bracket the expiry by clock readings taken just
+        // before and after construction so the assertion holds regardless of how
+        // much time elapsed in between.
+        for (option, ttl) in [
+            (ExpirationOptions::Hour, Duration::from_hours(1)),
+            (ExpirationOptions::Day, Duration::from_hours(24)),
+            (ExpirationOptions::Week, Duration::from_hours(7 * 24)),
+        ] {
+            let before = SystemTime::now();
+            let shortened = ShortenedUrl::new("https://example.com", option);
+            let after = SystemTime::now();
+
+            assert!(shortened.expire_at >= before + ttl);
+            assert!(shortened.expire_at <= after + ttl);
+        }
+    }
+
+    #[test]
+    fn new_honours_a_custom_expiration_duration() {
+        let ttl = Duration::from_secs(90);
         let before = SystemTime::now();
-        let shortened = ShortenedUrl::new("https://example.com");
+        let shortened = ShortenedUrl::new("https://example.com", ExpirationOptions::Custom(ttl));
         let after = SystemTime::now();
 
-        // The expiry is "now + 24h"; bracket it by the clock readings taken
-        // immediately before and after construction so the assertion holds
-        // regardless of how much time elapsed in between.
-        assert!(shortened.expire_at >= before + Duration::from_hours(24));
-        assert!(shortened.expire_at <= after + Duration::from_hours(24));
+        assert!(shortened.expire_at >= before + ttl);
+        assert!(shortened.expire_at <= after + ttl);
     }
 
     #[test]
