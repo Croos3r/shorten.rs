@@ -246,25 +246,25 @@ async fn shorten_url_rejects_a_blacklisted_url() {
 
 #[actix_web::test]
 async fn shorten_url_does_not_persist_a_blacklisted_url() {
-    let service = common::test_service_with_blacklist(vec!["https://mydomain.com"]).await;
+    // Build the service over an owned pool so we can inspect the table directly.
+    let pool = common::test_pool().await;
+    let service = UrlShortenerService::new(pool.clone(), vec!["https://mydomain.com".into()]);
 
-    // The blacklist check must short-circuit before any insert; shortening an
-    // allowed url afterwards yields the very first generated id, proving no row
-    // was written for the rejected one.
+    // The blacklist check must short-circuit before any insert.
     let _ = service
         .shorten_url("https://mydomain.com/self", ExpirationOptions::Hour)
         .await;
 
-    let id = service
-        .shorten_url("https://example.com", ExpirationOptions::Hour)
+    // Assert directly that no row was written for the rejected url (the
+    // `_with_expired` variant ignores expiry, so even a stray row would surface)
+    // rather than inferring non-persistence from an unrelated later shorten.
+    let persisted = ShortenedUrl::find_by_url_with_expired("https://mydomain.com/self", &pool)
         .await
-        .expect("a non-blacklisted url should still be shortenable");
-    let stored = service
-        .find_shortened_url_by_id(&id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(stored.full_url, "https://example.com");
+        .expect("query should succeed");
+    assert!(
+        persisted.is_none(),
+        "a blacklisted url must never be persisted"
+    );
 }
 
 #[actix_web::test]
@@ -354,8 +354,13 @@ async fn find_by_url_with_expired_still_returns_an_expired_url() {
 async fn shorten_url_ignores_a_pre_existing_expired_entry_for_the_same_url() {
     // With dedup gone, shortening always mints a fresh id; this pins that a stale
     // expired row for the same url neither blocks the new entry nor resurfaces.
+    //
+    // The seeded id deliberately contains a `-`: `shorten_url` only mints
+    // alphanumeric ids, so this can never collide with a generated one, keeping
+    // the `assert_ne!` about logical reuse rather than RNG luck.
+    let seeded_id = "exp-d";
     let past = SystemTime::now() - Duration::from_secs(60);
-    let (service, _pool) = service_with_seeded_url("exprd", "https://reuse.example", past).await;
+    let (service, _pool) = service_with_seeded_url(seeded_id, "https://reuse.example", past).await;
 
     let new_id = service
         .shorten_url("https://reuse.example", ExpirationOptions::Hour)
@@ -363,7 +368,7 @@ async fn shorten_url_ignores_a_pre_existing_expired_entry_for_the_same_url() {
         .expect("shortening should succeed");
 
     assert_ne!(
-        new_id, "exprd",
+        new_id, seeded_id,
         "a fresh id must be minted, not the expired one"
     );
     // The freshly minted id is retrievable; the expired one remains hidden.
@@ -378,7 +383,7 @@ async fn shorten_url_ignores_a_pre_existing_expired_entry_for_the_same_url() {
     );
     assert!(
         service
-            .find_shortened_url_by_id("exprd")
+            .find_shortened_url_by_id(seeded_id)
             .await
             .unwrap()
             .is_none(),
@@ -390,12 +395,16 @@ async fn shorten_url_ignores_a_pre_existing_expired_entry_for_the_same_url() {
 async fn re_shortening_a_valid_url_creates_a_new_entry_without_touching_the_original() {
     // Without dedup, re-shortening a url that already has a live entry mints a
     // *separate* entry and leaves the original's id and `expire_at` untouched.
+    //
+    // The seeded id contains a `-` so it can never collide with the alphanumeric
+    // id `shorten_url` generates, keeping the new-entry assertions collision-proof.
+    let seeded_id = "ttl-d";
     let future = SystemTime::now() + Duration::from_secs(3600);
-    let (service, _pool) = service_with_seeded_url("ttlid", "https://ttl.example", future).await;
+    let (service, _pool) = service_with_seeded_url(seeded_id, "https://ttl.example", future).await;
 
     // Read the persisted (second-granularity) expiry before re-shortening.
     let before = service
-        .find_shortened_url_by_id("ttlid")
+        .find_shortened_url_by_id(seeded_id)
         .await
         .unwrap()
         .unwrap()
@@ -406,12 +415,12 @@ async fn re_shortening_a_valid_url_creates_a_new_entry_without_touching_the_orig
         .await
         .expect("shortening should succeed");
     assert_ne!(
-        id, "ttlid",
+        id, seeded_id,
         "re-shortening should mint a new id, not reuse the live one"
     );
 
     let after = service
-        .find_shortened_url_by_id("ttlid")
+        .find_shortened_url_by_id(seeded_id)
         .await
         .unwrap()
         .unwrap()
