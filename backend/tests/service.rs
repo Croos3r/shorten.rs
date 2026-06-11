@@ -250,10 +250,21 @@ async fn shorten_url_does_not_persist_a_blacklisted_url() {
     let pool = common::test_pool().await;
     let service = UrlShortenerService::new(pool.clone(), vec!["https://mydomain.com".into()]);
 
-    // The blacklist check must short-circuit before any insert.
-    let _ = service
+    // The blacklist check must short-circuit before any insert. Assert the
+    // rejection here too so the test stands on its own: a `shorten_url` that
+    // wrongly returned `Ok` for a blacklisted url (even without persisting)
+    // must not slip through just because the later non-persistence check passes.
+    let err = service
         .shorten_url("https://mydomain.com/self", ExpirationOptions::Hour)
-        .await;
+        .await
+        .expect_err("shortening a blacklisted url should fail");
+    assert!(
+        matches!(
+            err.downcast_ref::<ShortenUrlError>(),
+            Some(ShortenUrlError::BlacklistedUrl)
+        ),
+        "error should be a BlacklistedUrl, got: {err:?}"
+    );
 
     // Assert directly that no row was written for the rejected url (the
     // `_with_expired` variant ignores expiry, so even a stray row would surface)
